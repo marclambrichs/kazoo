@@ -1,7 +1,10 @@
 -module(kz_data_tracing).
 -behaviour(gen_server).
 
--export([start_link/0]).
+-export([start_link/0
+        ,status/0, status/1
+        ,clear_all_traces/0
+        ]).
 
 -export([init/1
         ,handle_call/3
@@ -11,7 +14,7 @@
         ,code_change/3
         ]).
 
--export([trace_file/0, trace_file/1, trace_file/2, trace_file/3]).
+-export([trace_file/0, trace_file/1, trace_file/2, trace_file/3, trace_file/4]).
 -export([stop_trace/1]).
 
 -include_lib("kazoo_stdlib/include/kz_types.hrl").
@@ -24,9 +27,9 @@
                                      ," (", 'pid', ") "
                                      ,'message', "\n"
                                      ]).
--define(DEFAULT_TRACE_PROPS,
+-define(DEFAULT_TRACE_PROPS(Format),
         [{'formatter', 'lager_default_formatter'}
-        ,{'formatter_config', ?DEFAULT_TRACE_OUTPUT_FORMAT}
+        ,{'formatter_config', Format}
         ]
        ).
 
@@ -41,6 +44,12 @@
 
 -type trace_result() :: {{'lager_file_backend', file:filename_all()}, filters(), lager:log_level()}.
 -type trace_results() :: [{ne_binary(), file:filename_all(), trace_result()}].
+
+-type trace_options() :: #{'filters' => filters()
+                          ,'filename' => file:filename_all()
+                          ,'trace_properties' => list()
+                          ,'log_level' => atom()
+                          }.
 
 -record(state, {traces = [] :: trace_results()
                }).
@@ -58,6 +67,9 @@
 -spec trace_file(filters(), file:filename_all(), list()) ->
                         {'ok', ne_binary()} |
                         {'error', trace_error()}.
+-spec trace_file(filters(), file:filename_all(), list(), atom()) ->
+                        {'ok', ne_binary()} |
+                        {'error', trace_error()}.
 trace_file() ->
     trace_file([{'function', '*'}]).
 
@@ -65,10 +77,33 @@ trace_file(Filters) ->
     trace_file(Filters, <<"/tmp/", (kz_binary:rand_hex(16))/binary, ".log">>).
 
 trace_file(Filters, Filename) ->
-    trace_file(Filters, Filename, ?DEFAULT_TRACE_PROPS).
+    trace_file(Filters, Filename, ?DEFAULT_TRACE_PROPS(?DEFAULT_TRACE_OUTPUT_FORMAT)).
 
 trace_file(Filters, Filename, Format) ->
-    gen_server:call(?MODULE, {'trace_file', Filters, Filename, Format}).
+    trace_file(Filters, Filename, Format, 'debug').
+
+trace_file(Filters, Filename, Format, LogLevel) ->
+    gen_server:call(?MODULE
+                   ,{'trace_file'
+                    ,#{'filters' => Filters
+                      ,'filename' => Filename
+                      ,'trace_properties' => ?DEFAULT_TRACE_PROPS(Format)
+                      ,'log_level' => LogLevel
+                      }
+                    }
+                   ).
+
+-spec status() -> [{ne_binary(), file:filename_all(), any()}].
+status() ->
+    gen_server:call(?MODULE, 'status').
+
+-spec status(Ref) -> {Ref, file:filename_all(), any()} | 'false'.
+status(Ref) ->
+    gen_server:call(?MODULE, {'status', Ref}).
+
+-spec clear_all_traces() -> 'ok'.
+clear_all_traces() ->
+    gen_server:call(?MODULE, 'clear_all_traces', 1 * ?MILLISECONDS_IN_HOUR).
 
 -spec stop_trace(ne_binary()) ->
                         {'ok', file:filename_all()} |
@@ -85,17 +120,28 @@ init([]) ->
     {'ok', #state{}}.
 
 -spec handle_call(any(), pid_ref(), state()) -> handle_call_ret_state(state()).
-handle_call({'trace_file', Filters, Filename, Format}
-           ,_From
-           ,#state{traces=Traces}=State
-           ) ->
-    case start_trace(Filters, Filename, Format) of
+handle_call({'trace_file', TraceOptions}, _From, #state{traces=Traces}=State) ->
+    case start_trace(TraceOptions) of
         {'ok', TraceResult} ->
             Ref = kz_binary:rand_hex(6),
-            {'reply', {'ok', Ref}, State#state{traces=[{Ref, Filename, TraceResult}|Traces]}};
+            {'reply'
+            ,{'ok', Ref}
+            ,State#state{traces=[trace_ref(Ref, TraceOptions, TraceResult) | Traces]}
+            };
         Result ->
             {'reply', Result, State}
     end;
+handle_call('status', _From, #state{traces=Traces}=State) ->
+    {'reply', Traces, State};
+handle_call({'status', Ref}, _From, #state{traces=Traces}=State) ->
+    {'reply', lists:keyfind(Ref, 1, Traces), State};
+handle_call('clear_all_traces', _From, #state{traces=Traces}=State) ->
+    {'reply'
+    ,[{Ref, stop_trace_file(TraceResult)}
+      || {Ref, _Filename, TraceResult} <- Traces
+     ]
+    ,State#state{traces=[]}
+    };
 handle_call({'stop_trace', TraceRef}
            ,_From
            ,#state{traces=Traces}=State
@@ -132,12 +178,22 @@ code_change(_Vsn, State, _Extra) ->
 stop_trace_file(Trace) ->
     lager:stop_trace(Trace).
 
--spec start_trace(filters(), file:filename_all(), list()) ->
+-spec start_trace(trace_options()) ->
                          {'ok', trace_result()} |
                          {'error', trace_error()}.
-start_trace(Filters, Filename, Format) ->
+
+start_trace(#{'filters' := Filters
+             ,'filename' := Filename
+             ,'trace_properties' := Format
+             ,'log_level' := LogLevel
+             }) ->
     lager:trace_file(kz_term:to_list(Filename)
                     ,[{'sink', 'data_lager_event'} | Filters]
-                    ,'debug'
+                    ,LogLevel
                     ,Format
                     ).
+
+-spec trace_ref(Ref, trace_options(), trace_result()) ->
+                       {Ref, file:filename_all(), trace_result()}.
+trace_ref(Ref, TraceOptions, TraceResult) ->
+    {Ref, maps:get('filename', TraceOptions), TraceResult}.
