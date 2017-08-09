@@ -484,7 +484,6 @@ handle_read_result(TaskId, OrigContext, ReadContext) ->
     case cb_context:resp_data(ReadContext) of
         [] -> crossbar_util:response_bad_identifier(TaskId, OrigContext);
         [TaskJObj] ->
-            lager:debug("task: ~p", [TaskJObj]),
             JObj = kz_json:set_value(<<"_read_only">>, TaskJObj, kz_json:new()),
             cb_context:set_resp_data(ReadContext, JObj)
     end.
@@ -505,10 +504,7 @@ read_attachment(TaskId, Context, AccountId) ->
 
 -spec requested_attachment_name(cb_context:context()) -> ne_binary().
 requested_attachment_name(Context) ->
-    cb_context:req_value(Context
-                        ,<<"csv_name">>
-                        ,?KZ_TASKS_ANAME_OUT
-                        ).
+    cb_context:req_value(Context, <<"csv_name">>, ?KZ_TASKS_ANAME_OUT).
 
 -spec csv_path_to_file(ne_binary()) -> ne_binary().
 csv_path_to_file(?PATH_INPUT) ->
