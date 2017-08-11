@@ -316,7 +316,8 @@ remove_orphaned_services() ->
         andalso io:format("removed ~p service docs~n", [Count]),
     'no_return'.
 
--spec maybe_remove_orphan(kz_json:object(), non_neg_integer()) -> non_neg_integer().
+-spec maybe_remove_orphan(kz_json:object() | ne_binary(), non_neg_integer()) ->
+                                 non_neg_integer().
 maybe_remove_orphan(<<"_design/", _/binary>>, Count) -> Count;
 maybe_remove_orphan(<<_/binary>> = AccountId, Count) ->
     case kz_account:fetch(AccountId) of

@@ -45,7 +45,7 @@ reconcile(Services, 'undefined') ->
 reconcile(Services, RatedeckName) ->
     kz_services:update(?SERVICE_CATEGORY, RatedeckName, 1, Services).
 
--spec get_ratedeck_name(api_binary() | kz_services:services()) -> api_binary().
+-spec get_ratedeck_name(api_binary() | kzd_service_plan:doc()) -> api_binary().
 get_ratedeck_name('undefined') -> 'undefined';
 get_ratedeck_name(<<_/binary>> = AccountId) ->
     get_ratedeck_name(kz_services:service_plan_json(AccountId));
